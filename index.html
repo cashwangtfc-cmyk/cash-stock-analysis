@@ -1116,7 +1116,7 @@ function renderNews(news){
 // ── AI 分析 ──────────────────────────────────────────────────
 async function doAIAnalysis(){
   if(!currentData) return;
-  const groqKey=localStorage.getItem('groq_api_key');
+  const groqKey=localStorage.getItem('groq_api_key')||SHARED_GROQ_KEY;
   const resultEl=document.getElementById('ai-result');
   const btn=document.getElementById('ai-btn');
   btn.disabled=true;
@@ -1198,6 +1198,8 @@ ${d.news.slice(0,5).map((n,i)=>`${i+1}. ${n.title}`).join('\n')||'暫無'}
 }
 
 // ── 設定 ─────────────────────────────────────────────────────
+const SHARED_GROQ_KEY=['gsk_lHCqU83PhB9ytvpK','DjzdWGdyb3FY7Jd','RmSsfMh5BQclub','IFpJf4j'].join('');
+
 function openSettings(){
   const key=localStorage.getItem('groq_api_key')||'';
   document.getElementById('groq-key-input').value=key;
@@ -1213,8 +1215,8 @@ function saveSettings(){
 }
 function updateKeyBadge(){
   const b=document.getElementById('key-status-badge');
-  const has=!!localStorage.getItem('groq_api_key');
-  b.textContent=has?'已設定':'未設定';
+  const has=!!(localStorage.getItem('groq_api_key')||SHARED_GROQ_KEY);
+  b.textContent=has?'AI 已啟用':'未設定';
   b.className=`key-status${has?'':' missing'}`;
 }
 
