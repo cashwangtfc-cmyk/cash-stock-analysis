@@ -163,10 +163,107 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Noto Sans TC','Microsoft Jhen
 .btn-ghost{padding:10px 22px;background:transparent;color:var(--gray-500);border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:var(--fs-md);font-weight:600;cursor:pointer;}
 .key-status{display:inline-block;margin-left:8px;font-size:var(--fs-xs);padding:2px 8px;border-radius:10px;background:var(--green-l);color:var(--green);font-weight:700;}
 .key-status.missing{background:var(--amber-l);color:var(--amber);}
-@media(max-width:600px){
-  .header{padding:14px 12px;}.search-bar{flex:1 1 100%;}
+/* ── Touch targets & tap delay ── */
+button,.hint-chip,.period-btn,.tab-btn,.search-btn,.news-item{touch-action:manipulation;}
+
+/* ── Responsive ── */
+@media(max-width:640px){
+  /* Header */
+  .header{flex-direction:column;align-items:stretch;gap:10px;padding:12px 12px 8px;}
+  .logo-icon{font-size:26px;}
+  .logo-text h1{font-size:var(--fs-lg);}
+  .logo-text p{font-size:11px;}
+  .search-bar{max-width:100%;}
+  .search-bar input{font-size:16px;} /* 防止 iOS 自動縮放 */
+  .search-btn{padding:11px 16px;font-size:var(--fs-sm);}
+  .settings-btn{align-self:flex-start;}
+
+  /* Hint chips 橫向捲動，不換行 */
+  .hint-chips{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;scrollbar-width:none;margin-top:5px;}
+  .hint-chips::-webkit-scrollbar{display:none;}
+  .hint-chip{flex-shrink:0;}
+
+  /* Container */
+  .container{padding:10px 10px;}
+
+  /* Stock header */
+  .stock-header{flex-direction:column;gap:10px;padding:16px;}
+  .price-block{text-align:left;}
   .price-block .price{font-size:var(--fs-2xl);}
-  .chart-wrap{height:250px;}.tech-big-val{font-size:28px;}
+  .price-block .change{font-size:var(--fs-md);}
+  .stock-meta{gap:10px;}
+  .meta-item .value{font-size:var(--fs-sm);}
+  .meta-item .label{font-size:10px;}
+
+  /* Chart */
+  .chart-wrap{height:210px;padding:10px;}
+  .card-head{padding:11px 12px;gap:6px;}
+  .card-title{font-size:var(--fs-sm);}
+  .period-btn{padding:6px 9px;font-size:12px;}
+
+  /* Tabs */
+  .tab-btn{padding:12px 12px;font-size:13px;}
+  .tab-content{padding:14px;}
+
+  /* Score card */
+  .score-gauge{width:64px;height:64px;font-size:22px;}
+  .score-verdict{font-size:var(--fs-md);}
+  .score-signals{gap:4px;}
+
+  /* Metric grid — 2 欄 */
+  .metric-grid{grid-template-columns:1fr 1fr;gap:8px;}
+  .metric-card{padding:12px 12px;}
+  .metric-label{font-size:12px;}
+  .metric-value{font-size:var(--fs-lg);}
+  .metric-sub{font-size:11px;}
+
+  /* Tech */
+  .tech-grid{grid-template-columns:1fr;}
+  .tech-big-val{font-size:28px;}
+  .tech-card{padding:14px;}
+  .tech-desc{font-size:13px;}
+  .macd-row{gap:5px;}
+  .macd-item{padding:8px 6px;}
+  .macd-item .val{font-size:var(--fs-md);}
+  .macd-item .label{font-size:11px;}
+  .tech-card-name{font-size:12px;}
+  .tech-tag{font-size:12px;}
+
+  /* Institutional */
+  .inst-grid{grid-template-columns:1fr 1fr;gap:8px;}
+  .inst-card{padding:12px 12px;}
+  .inst-card-val{font-size:var(--fs-xl);}
+  .inst-card-label{font-size:12px;}
+  .inst-card-sub{font-size:11px;}
+
+  /* News */
+  .news-title{font-size:var(--fs-sm);}
+  .news-item{padding:11px 12px;gap:10px;}
+  .news-meta{font-size:12px;}
+
+  /* AI */
+  .ai-btn{padding:14px 16px;font-size:var(--fs-sm);}
+  .ai-result{padding:16px;}
+  .ai-result h3{font-size:var(--fs-md);}
+  .ai-result p,.ai-result li{font-size:var(--fs-sm);}
+
+  /* Welcome */
+  .welcome{padding:40px 16px;}
+  .welcome-icon{font-size:56px;}
+  .welcome h2{font-size:var(--fs-xl);}
+  .welcome p{font-size:var(--fs-sm);}
+
+  /* Modal */
+  .modal{padding:20px 16px;}
+  .modal h2{font-size:var(--fs-lg);}
+}
+
+@media(max-width:380px){
+  .period-btn{padding:5px 7px;font-size:11px;}
+  .tab-btn{padding:10px 9px;font-size:12px;}
+  .score-gauge{width:56px;height:56px;font-size:20px;}
+  .metric-grid{gap:6px;}
+  .inst-grid{grid-template-columns:1fr;}
 }
 </style>
 </head>
