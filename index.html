@@ -479,6 +479,61 @@ function calcStochastic(closes, highs, lows, period=9, sig=3){
   return { k:fmt(lk,1), d:fmt(ld,1), golden:pk<=pd&&lk>ld, dead:pk>=pd&&lk<ld };
 }
 
+function calcATR(closes, highs, lows, period=14){
+  const n=closes.length;
+  if(n<period+1) return {atr:null,atrPercent:null};
+  const tr=[];
+  for(let i=1;i<n;i++) tr.push(Math.max(highs[i]-lows[i],Math.abs(highs[i]-closes[i-1]),Math.abs(lows[i]-closes[i-1])));
+  if(tr.length<period) return {atr:null,atrPercent:null};
+  let atr=tr.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  for(let i=period;i<tr.length;i++) atr=(atr*(period-1)+tr[i])/period;
+  const cur=closes[n-1];
+  return {atr:fmt(atr,2),atrPercent:cur?fmt(atr/cur*100,2):null};
+}
+
+function calcWilliamsR(closes, highs, lows, period=14){
+  const n=closes.length;
+  if(n<period) return null;
+  const h=Math.max(...highs.slice(-period)), l=Math.min(...lows.slice(-period));
+  if(h===l) return -50;
+  return fmt((h-closes[n-1])/(h-l)*-100,1);
+}
+
+function calcOBVTrend(closes, vols){
+  const n=closes.length;
+  if(n<6) return null;
+  let obv=0;
+  const arr=[0];
+  for(let i=1;i<n;i++){ if(closes[i]>closes[i-1]) obv+=vols[i]; else if(closes[i]<closes[i-1]) obv-=vols[i]; arr.push(obv); }
+  const last=arr[arr.length-1], avg5=arr.slice(-6,-1).reduce((a,b)=>a+b,0)/5;
+  return last>avg5*1.01?'rising':last<avg5*0.99?'falling':'flat';
+}
+
+function calcADX(closes, highs, lows, period=14){
+  const n=closes.length;
+  if(n<period*2+1) return null;
+  const tr=[], pdm=[], mdm=[];
+  for(let i=1;i<n;i++){
+    tr.push(Math.max(highs[i]-lows[i],Math.abs(highs[i]-closes[i-1]),Math.abs(lows[i]-closes[i-1])));
+    const up=highs[i]-highs[i-1], dn=lows[i-1]-lows[i];
+    pdm.push(up>dn&&up>0?up:0);
+    mdm.push(dn>up&&dn>0?dn:0);
+  }
+  let satr=tr.slice(0,period).reduce((a,b)=>a+b,0);
+  let spdm=pdm.slice(0,period).reduce((a,b)=>a+b,0);
+  let smdm=mdm.slice(0,period).reduce((a,b)=>a+b,0);
+  const dx=[]; let lpdi=0, lmdi=0;
+  for(let i=period;i<tr.length;i++){
+    satr=satr-satr/period+tr[i]; spdm=spdm-spdm/period+pdm[i]; smdm=smdm-smdm/period+mdm[i];
+    lpdi=satr>0?100*spdm/satr:0; lmdi=satr>0?100*smdm/satr:0;
+    const s=lpdi+lmdi; dx.push(s>0?100*Math.abs(lpdi-lmdi)/s:0);
+  }
+  if(dx.length<period) return null;
+  let adx=dx.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  for(let i=period;i<dx.length;i++) adx=(adx*(period-1)+dx[i])/period;
+  return {adx:fmt(adx,1),diPlus:fmt(lpdi,1),diMinus:fmt(lmdi,1)};
+}
+
 // ── 技術指標整合 ─────────────────────────────────────────────
 function calcTechnical(chartResult){
   const ohlcv=chartResult.indicators?.quote?.[0]||{};
@@ -521,6 +576,26 @@ function calcTechnical(chartResult){
     const kd=calcStochastic(closes,highs,lows);
     if(kd){ tech.kdK=kd.k; tech.kdD=kd.d; tech.kdGolden=kd.golden; tech.kdDead=kd.dead; }
   }
+
+  // EMA 9/21
+  if(len>=21){
+    const e9=calcEMA(closes,9), e21=calcEMA(closes,21);
+    if(e9.length&&e21.length){
+      tech.ema9=fmt(e9[e9.length-1]); tech.ema21=fmt(e21[e21.length-1]);
+      if(e9.length>=2&&e21.length>=2){
+        const n9=e9[e9.length-1],p9=e9[e9.length-2],n21=e21[e21.length-1],p21=e21[e21.length-2];
+        tech.emaGolden=p9<=p21&&n9>n21; tech.emaDead=p9>=p21&&n9<n21;
+      }
+    }
+  }
+  // OBV
+  if(len>=6) tech.obvTrend=calcOBVTrend(closes,vols);
+  // ATR
+  if(len>=15){const r=calcATR(closes,highs,lows);tech.atr=r.atr;tech.atrPercent=r.atrPercent;}
+  // Williams %R
+  if(len>=14) tech.williamsR=calcWilliamsR(closes,highs,lows);
+  // ADX
+  if(len>=29){const r=calcADX(closes,highs,lows);if(r){tech.adx=r.adx;tech.diPlus=r.diPlus;tech.diMinus=r.diMinus;}}
 
   // 量比
   if(len>=21){
@@ -964,6 +1039,10 @@ function computeScore(tech,fund,inst){
   if(inst?.totalNet!=null){const l=inst.totalNet/1000;if(l>2000)sc+=10;else if(l>300)sc+=6;else if(l>0)sc+=3;else if(l<-2000)sc-=10;else if(l<-300)sc-=6;else if(l<0)sc-=3;}
   if(fund.peRatio!=null&&fund.peRatio>0){if(fund.peRatio<=15)sc+=5;else if(fund.peRatio>35)sc-=5;}
   if(fund.dividendYield>=4)sc+=5;else if(fund.dividendYield>=2)sc+=2;
+  if(tech.ema9!=null&&tech.ema21!=null){if(tech.emaGolden)sc+=5;else if(tech.emaDead)sc-=5;else sc+=(tech.ema9>tech.ema21?3:-3);}
+  if(tech.obvTrend==='rising')sc+=5;else if(tech.obvTrend==='falling')sc-=5;
+  if(tech.williamsR!=null){if(tech.williamsR>=-20)sc-=5;else if(tech.williamsR<=-80)sc+=5;}
+  if(tech.adx!=null){if(tech.adx<15)sc=50+(sc-50)*0.55;else if(tech.adx>=30)sc=50+(sc-50)*1.12;}
   return Math.max(5,Math.min(95,Math.round(sc)));
 }
 
@@ -1053,6 +1132,9 @@ function renderTechnical(tech,price,inst){
   if(tech.kdK!=null) sigs.push(`<span class="badge ${tech.kdGolden?'badge-up':tech.kdDead?'badge-down':'badge-neutral'}">KD ${kdLabel}</span>`);
   if(vr!=null) sigs.push(`<span class="badge badge-neutral">量比 ${vr}x</span>`);
   if(inst?.totalNet!=null){const l=Math.round(inst.totalNet/1000);sigs.push(`<span class="badge ${l>0?'badge-up':l<0?'badge-down':'badge-neutral'}">法人 ${l>0?'+':''}${l.toLocaleString()}張</span>`);}
+  if(tech.ema9!=null&&tech.ema21!=null) sigs.push(`<span class="badge ${tech.emaGolden?'badge-up':tech.emaDead?'badge-down':tech.ema9>tech.ema21?'badge-up':'badge-neutral'}">EMA ${tech.emaGolden?'金叉★':tech.emaDead?'死叉★':tech.ema9>tech.ema21?'多排':'空排'}</span>`);
+  if(tech.adx!=null) sigs.push(`<span class="badge ${tech.adx>=25?(tech.diPlus>tech.diMinus?'badge-up':'badge-down'):'badge-neutral'}">ADX ${tech.adx} ${tech.adx>=25?'趨勢':tech.adx<15?'盤整':'弱勢'}</span>`);
+  if(tech.obvTrend) sigs.push(`<span class="badge ${tech.obvTrend==='rising'?'badge-up':tech.obvTrend==='falling'?'badge-down':'badge-neutral'}">OBV ${tech.obvTrend==='rising'?'↑':tech.obvTrend==='falling'?'↓':'→'}</span>`);
 
   const bbBarHTML=bb&&price.current?`
     <div class="bb-bar">
@@ -1128,6 +1210,40 @@ function renderTechnical(tech,price,inst){
         <div style="font-size:var(--fs-xs);color:var(--gray-400);margin-top:4px;">基準線 = 20日均量</div>`:'<div style="color:var(--gray-400);font-size:var(--fs-sm);margin:8px 0;">資料不足</div>'}
         <div class="tech-desc">${volDesc}</div>
       </div>
+      ${tech.ema9!=null?`<div class="tech-card">
+        <div class="tech-card-hd"><span class="tech-card-name">EMA 指數移動平均交叉（9/21）</span><span class="tech-tag ${tech.emaGolden?'good':tech.emaDead?'bad':tech.ema9>tech.ema21?'good':'warn'}">${tech.emaGolden?'金叉 ★':tech.emaDead?'死叉 ★':tech.ema9>tech.ema21?'偏多':'偏空'}</span></div>
+        <div style="font-size:var(--fs-md);line-height:2.1;margin:6px 0;">
+          <div>EMA9（短線）：<b>${tech.ema9}</b>${tech.ema9>tech.ema21?' <span style="color:var(--green);font-size:12px;">▲ 在 EMA21 上方</span>':' <span style="color:var(--red);font-size:12px;">▼ 在 EMA21 下方</span>'}</div>
+          <div>EMA21（中線）：<b>${tech.ema21}</b></div>
+        </div>
+        <div class="tech-desc">${tech.emaGolden?'EMA9 剛上穿 EMA21，金叉確認，短線多頭動能開始形成。':tech.emaDead?'EMA9 剛下穿 EMA21，死叉確認，短線空頭動能啟動。':tech.ema9>tech.ema21?'EMA9 維持在 EMA21 上方，短線趨勢偏多。':'EMA9 在 EMA21 下方，短線趨勢偏弱，不宜追高。'}</div>
+      </div>`:''}
+      ${tech.adx!=null?`<div class="tech-card">
+        <div class="tech-card-hd"><span class="tech-card-name">ADX 趨勢強度指數（14日）</span><span class="tech-tag ${tech.adx>=30?(tech.diPlus>tech.diMinus?'good':'bad'):tech.adx<15?'warn':''}">${tech.adx>=40?'強趨勢':tech.adx>=25?'趨勢確立':tech.adx>=15?'弱趨勢':'盤整'}</span></div>
+        <div class="tech-big-val ${tech.adx>=25?(tech.diPlus>tech.diMinus?'good':'bad'):'warn'}">${tech.adx}</div>
+        <div style="font-size:var(--fs-md);line-height:2.1;margin:4px 0 8px;"><div>+DI（多方）：<b style="color:var(--green)">${tech.diPlus}</b>　　-DI（空方）：<b style="color:var(--red)">${tech.diMinus}</b></div></div>
+        <div class="rsi-track-wrap"><div class="rsi-track"><div class="rsi-pointer" style="left:${Math.min(100,tech.adx/50*100)}%;"></div></div>
+          <div class="rsi-labels"><span>0</span><span>15 盤整</span><span>25 趨勢</span><span>40 強勢</span><span>50+</span></div></div>
+        <div class="tech-desc">${tech.adx<15?'ADX<15，市場處於盤整，趨勢訊號可信度低。':tech.adx>=25?'ADX≥25，趨勢確立，可順勢操作。':'ADX 介於 15-25，趨勢形成中，等待方向確認。'}</div>
+      </div>`:''}
+      ${tech.obvTrend?`<div class="tech-card">
+        <div class="tech-card-hd"><span class="tech-card-name">OBV 能量潮（量價關係確認）</span><span class="tech-tag ${tech.obvTrend==='rising'?'good':tech.obvTrend==='falling'?'bad':''}">${tech.obvTrend==='rising'?'↑ 量能流入':tech.obvTrend==='falling'?'↓ 量能流出':'→ 持平'}</span></div>
+        <div class="tech-big-val ${tech.obvTrend==='rising'?'good':tech.obvTrend==='falling'?'bad':''}" style="font-size:28px;">${tech.obvTrend==='rising'?'▲ 上升':tech.obvTrend==='falling'?'▼ 下降':'→ 持平'}</div>
+        <div class="tech-desc">${tech.obvTrend==='rising'?'OBV 上升，量能流入，價格上漲有量能支撐。':tech.obvTrend==='falling'?'OBV 下降，量能流出，賣壓較重。':'OBV 走平，量能中性，市場觀望氣氛。'}</div>
+      </div>`:''}
+      ${tech.williamsR!=null?`<div class="tech-card">
+        <div class="tech-card-hd"><span class="tech-card-name">Williams %R 威廉指標（14日）</span><span class="tech-tag ${tech.williamsR>=-20?'bad':tech.williamsR<=-80?'good':''}">${tech.williamsR>=-20?'超買區':tech.williamsR<=-80?'超賣區':'中性'}</span></div>
+        <div class="tech-big-val ${tech.williamsR>=-20?'bad':tech.williamsR<=-80?'good':''}">${tech.williamsR}</div>
+        <div class="rsi-track-wrap"><div class="rsi-track"><div class="rsi-pointer" style="left:${Math.min(100,Math.max(0,tech.williamsR+100))}%;"></div></div>
+          <div class="rsi-labels"><span>-100 超賣</span><span>-80</span><span>-50</span><span>-20</span><span>0 超買</span></div></div>
+        <div class="tech-desc">${tech.williamsR>=-20?'Williams %R 接近 0，超買，注意拉回。':tech.williamsR<=-80?'Williams %R 接近 -100，超賣，等待止跌確認。':'威廉指標處於中性區間，無明顯訊號。'}</div>
+      </div>`:''}
+      ${tech.atr!=null?`<div class="tech-card">
+        <div class="tech-card-hd"><span class="tech-card-name">ATR 平均真實波動範圍（14日）</span><span class="tech-tag ${tech.atrPercent>=3?'bad':tech.atrPercent>=1.5?'warn':'good'}">${tech.atrPercent>=3?'高波動':tech.atrPercent>=1.5?'中波動':'低波動'}</span></div>
+        <div class="tech-big-val ${tech.atrPercent>=3?'bad':tech.atrPercent>=1.5?'warn':'good'}">${tech.atr}</div>
+        <div style="font-size:var(--fs-sm);color:var(--gray-500);margin:2px 0 8px;">佔股價 <b>${tech.atrPercent}%</b>　　2×ATR 停損距離：<b>${price.current?(price.current-tech.atr*2).toFixed(2):'—'}</b></div>
+        <div class="tech-desc">${tech.atrPercent>=3?'波動率偏高，建議以 2×ATR 設定停損。':tech.atrPercent>=1.5?'波動率適中，停損可參考 2×ATR 距離。':'波動率低，適合穩健操作。'}</div>
+      </div>`:''}
       ${p52!=null?`<div class="tech-card" style="grid-column:1/-1;">
         <div class="tech-card-hd"><span class="tech-card-name">52週相對位置</span><span class="tech-tag ${p52C}">${p52L} · ${p52}%</span></div>
         <div class="week52-bar"><div class="week52-pointer" style="left:${Math.min(97,Math.max(3,p52))}%;"></div></div>
