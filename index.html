@@ -265,6 +265,28 @@ button,.hint-chip,.period-btn,.tab-btn,.search-btn,.news-item{touch-action:manip
   .metric-grid{gap:6px;}
   .inst-grid{grid-template-columns:1fr;}
 }
+.div-table-wrap{overflow-x:auto;margin-top:12px;border-radius:var(--radius-sm);border:1px solid var(--border);}
+.div-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm);}
+.div-table th{padding:9px 13px;background:var(--gray-50);color:var(--gray-500);font-weight:700;text-align:left;border-bottom:2px solid var(--border);white-space:nowrap;}
+.div-table td{padding:9px 13px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.div-table tr:last-child td{border-bottom:none;}
+.div-table tbody tr:hover td{background:var(--gray-50);}
+.fill-badge{display:inline-block;padding:3px 9px;border-radius:12px;font-size:11px;font-weight:700;white-space:nowrap;}
+.fill-badge.fast{background:#dbeafe;color:#1d4ed8;}
+.fill-badge.filled{background:var(--green-l);color:var(--green);}
+.fill-badge.slow{background:var(--amber-l);color:var(--amber);}
+.fill-badge.unfilled{background:var(--red-l);color:var(--red);}
+.director-list{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
+.director-item{display:flex;gap:12px;padding:12px 14px;background:var(--gray-50);border-radius:var(--radius-sm);border:1px solid var(--border);align-items:flex-start;}
+.director-icon{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
+.director-icon.buy{background:var(--green-l);}
+.director-icon.sell{background:var(--red-l);}
+.director-body{flex:1;min-width:0;}
+.director-name{font-size:var(--fs-sm);font-weight:700;color:#0f172a;}
+.director-chg{font-size:var(--fs-lg);font-weight:900;margin:3px 0;}
+.director-chg.pos{color:var(--red);}
+.director-chg.neg{color:var(--green);}
+.director-meta{font-size:var(--fs-xs);color:var(--gray-400);margin-top:2px;}
 </style>
 </head>
 <body>
@@ -717,6 +739,100 @@ async function fetchGoogleNews(code, ticker){
   }catch{ return []; }
 }
 
+// ── 歷年配息與填息天數（Yahoo Finance events）────────────────
+const _divHistCache=new Map();
+async function fetchDividendHistory(ticker){
+  const cached=_divHistCache.get(ticker);
+  if(cached&&Date.now()-cached.ts<86400000) return cached.data;
+  try{
+    const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5y&interval=1d&events=dividends&includePrePost=false`;
+    const r=await proxyFetch(url);
+    const j=await r.json();
+    const result=j?.chart?.result?.[0];
+    if(!result) return [];
+    const divEvents=result.events?.dividends;
+    if(!divEvents||!Object.keys(divEvents).length) return [];
+    const timestamps=result.timestamp||[];
+    const closes=result.indicators?.quote?.[0]?.close||[];
+    const history=Object.values(divEvents)
+      .sort((a,b)=>a.date-b.date)
+      .map(d=>{
+        const exTs=d.date, amount=d.amount;
+        let exIdx=timestamps.findIndex(t=>t>=exTs);
+        if(exIdx<0) exIdx=timestamps.length-1;
+        const preDivClose=exIdx>0?closes[exIdx-1]:null;
+        let fillDays=null,filled=false;
+        if(preDivClose!=null&&exIdx>=0){
+          for(let i=exIdx;i<timestamps.length;i++){
+            if(closes[i]!=null&&closes[i]>=preDivClose){fillDays=i-exIdx;filled=true;break;}
+          }
+          if(!filled&&timestamps.length>exIdx) fillDays=timestamps.length-exIdx;
+        }
+        return{
+          date:new Date(exTs*1000).toISOString().split('T')[0],
+          amount:parseFloat(amount.toFixed(3)),
+          preDivClose:preDivClose?parseFloat(preDivClose.toFixed(2)):null,
+          yieldPct:preDivClose?parseFloat((amount/preDivClose*100).toFixed(2)):null,
+          fillDays,filled,
+        };
+      }).reverse();
+    _divHistCache.set(ticker,{data:history,ts:Date.now()});
+    return history;
+  }catch{return null;}
+}
+
+// ── 董監事持股異動（TWSE TAUAW0 / Yahoo Finance insiderTransactions）──
+const _dirCache=new Map();
+async function fetchDirectorChanges(code,ticker){
+  const cached=_dirCache.get(code);
+  if(cached&&Date.now()-cached.ts<21600000) return cached.data;
+  // 1. Yahoo Finance insiderTransactions
+  if(ticker){
+    try{
+      const url=`https://query1.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=insiderTransactions`;
+      const r=await proxyFetch(url);
+      const j=await r.json();
+      const txns=j?.quoteSummary?.result?.[0]?.insiderTransactions?.transactions;
+      if(txns?.length>0){
+        const data={source:'Yahoo Finance',transactions:txns.slice(0,12).map(t=>({
+          date:t.startDate?.fmt||'',name:t.filerName||'',role:t.filerRelation||'',
+          shares:t.shares?.raw||null,isBuy:(t.shares?.raw||0)>0,txType:t.transactionText||'',
+        }))};
+        _dirCache.set(code,{data,ts:Date.now()});
+        return data;
+      }
+    }catch{}
+  }
+  // 2. TWSE 申報轉讓 TAUAW0
+  try{
+    const today=new Date(),start=new Date(today);
+    start.setMonth(start.getMonth()-6);
+    const fd=d=>`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+    const p=v=>{const n=parseFloat(String(v||'').replace(/,/g,''));return isNaN(n)?null:n;};
+    for(const url of[
+      `https://www.twse.com.tw/rwd/zh/insiderSale/TAUAW0?stockNo=${code}&startDate=${fd(start)}&endDate=${fd(today)}&response=json`,
+      `https://www.twse.com.tw/insiderSale/TAUAW0?stockNo=${code}&startDate=${fd(start)}&endDate=${fd(today)}&response=json`,
+    ]){
+      try{
+        const r=await fetch(url,{signal:AbortSignal.timeout(12000)});
+        if(!r.ok) continue;
+        const j=await r.json();
+        if(j.stat!=='OK'||!j.data?.length) continue;
+        const transactions=j.data.slice(0,15).map(row=>({
+          date:row[0]||'',name:row[4]||'',role:row[3]||'',
+          beforeShares:p(row[5]),changeShares:p(row[6]),afterShares:p(row[7]),
+          reason:row[8]||'',isBuy:p(row[6])>0,
+        })).filter(t=>t.changeShares!==0);
+        if(!transactions.length) continue;
+        const data={source:'TWSE 申報轉讓',transactions};
+        _dirCache.set(code,{data,ts:Date.now()});
+        return data;
+      }catch{}
+    }
+  }catch{}
+  return null;
+}
+
 // ── 規則引擎分析 ─────────────────────────────────────────────
 function analyzeStock(stockData){
   const {name,ticker,currency,price,fundamentals,technical,news,institutional}=stockData;
@@ -869,10 +985,12 @@ async function fetchStockData(rawTicker){
   const shortCode=resolved.replace(/\.(TW|TWO)$/,'');
   const {tech,chartDates,chartCloses,chartVols,chartMA20,chartMA50}=calcTechnical(chartResult);
 
-  const [twseData,instData,newsItems]=await Promise.all([
+  const [twseData,instData,newsItems,divHistory,dirChanges]=await Promise.all([
     fetchTWSEFundamentals(shortCode),
     fetchTWSEInstitutional(shortCode),
     fetchGoogleNews(shortCode,resolved),
+    fetchDividendHistory(resolved),
+    fetchDirectorChanges(shortCode,resolved),
   ]);
 
   const meta=chartResult.meta;
@@ -907,6 +1025,7 @@ async function fetchStockData(rawTicker){
     price, fundamentals, technical:tech,
     chart:{ labels:chartDates, prices:chartCloses, ma20:chartMA20, ma50:chartMA50, volumes:chartVols },
     news:newsItems, institutional:instData,
+    dividendHistory:divHistory, directorChanges:dirChanges,
   };
 }
 
@@ -955,8 +1074,8 @@ function renderAll(d){
   renderHeader(d);
   renderChart(d,currentPeriod);
   renderTechnical(d.technical,d.price,d.institutional);
-  renderInstitutional(d.institutional,d.price);
-  renderFundamentals(d.fundamentals,d.technical,d.currency,d.market);
+  renderInstitutional(d.institutional,d.price,d.directorChanges);
+  renderFundamentals(d.fundamentals,d.technical,d.currency,d.market,d.dividendHistory);
   renderNews(d.news);
 }
 
@@ -1253,7 +1372,7 @@ function renderTechnical(tech,price,inst){
     </div>`;
 }
 
-function renderInstitutional(inst,price){
+function renderInstitutional(inst,price,dirChanges){
   if(!inst){
     document.getElementById('tab-inst').innerHTML='<div style="color:var(--gray-400);text-align:center;padding:40px;">今日無三大法人資料（可能為假日或資料尚未公布）</div>';
     return;
@@ -1292,10 +1411,11 @@ function renderInstitutional(inst,price){
         <div class="inst-card-sub">券商自有資金操作</div>
       </div>
     </div>
-    <div style="font-size:var(--fs-sm);color:var(--gray-400);margin-top:8px;">資料來源：台灣證交所 T86，單位：張（1張=1000股）。每日收盤後更新。</div>`;
+    <div style="font-size:var(--fs-sm);color:var(--gray-400);margin-top:8px;">資料來源：台灣證交所 T86，單位：張（1張=1000股）。每日收盤後更新。</div>
+    ${renderDirectorChanges(dirChanges)}`;
 }
 
-function renderFundamentals(fund,tech,currency,market){
+function renderFundamentals(fund,tech,currency,market,divHistory){
   const cs=currency==='TWD'?'NT$':'$';
   function mc(v,g,b){return v==null?'':v<=g?'good':v>=b?'bad':'';}
   document.getElementById('tab-fund').innerHTML=`
@@ -1307,7 +1427,71 @@ function renderFundamentals(fund,tech,currency,market){
       ${tech.week52High!=null?`<div class="metric-card"><div class="metric-label">52週最高</div><div class="metric-value bad">${cs}${tech.week52High}</div><div class="metric-sub">近一年高點</div></div>`:''}
       ${tech.week52Low!=null?`<div class="metric-card"><div class="metric-label">52週最低</div><div class="metric-value good">${cs}${tech.week52Low}</div><div class="metric-sub">近一年低點</div></div>`:''}
     </div>
-    ${(!fund.peRatio&&!fund.dividendYield)?'<p style="color:var(--gray-400);font-size:var(--fs-sm);margin-top:12px;">今日TWSE基本面資料未取得，可能為假日或市場休市。</p>':''}`;
+    ${(!fund.peRatio&&!fund.dividendYield)?'<p style="color:var(--gray-400);font-size:var(--fs-sm);margin-top:12px;">今日TWSE基本面資料未取得，可能為假日或市場休市。</p>':''}
+    ${renderDividendHistory(divHistory)}`;
+}
+
+function renderDividendHistory(history){
+  if(!history||history.length===0) return `
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">
+      <div style="font-size:var(--fs-md);font-weight:700;color:#0f172a;margin-bottom:8px;">💰 歷年配息記錄（近5年）</div>
+      <div style="background:var(--gray-50);border-radius:var(--radius-sm);padding:12px 16px;font-size:var(--fs-sm);color:var(--gray-400);border:1px solid var(--border);">查無配息記錄</div>
+    </div>`;
+  const filledArr=history.filter(d=>d.filled&&d.fillDays!=null);
+  const avgFill=filledArr.length?Math.round(filledArr.reduce((s,d)=>s+d.fillDays,0)/filledArr.length):null;
+  const rows=history.map(d=>{
+    let fillHtml;
+    if(d.fillDays===null){fillHtml=`<span class="fill-badge" style="background:var(--gray-100);color:var(--gray-500);">無資料</span>`;}
+    else if(d.filled){const cls=d.fillDays<=5?'fast':d.fillDays<=30?'filled':'slow';fillHtml=`<span class="fill-badge ${cls}">${d.fillDays===0?'當日填息':d.fillDays+' 交易日'}</span>`;}
+    else{fillHtml=`<span class="fill-badge unfilled">未填息（已 ${d.fillDays} 日）</span>`;}
+    return `<tr>
+      <td style="font-family:monospace;color:var(--gray-500);">${d.date}</td>
+      <td style="font-weight:700;color:var(--green);">NT$ ${d.amount}</td>
+      <td style="color:var(--gray-500);">${d.preDivClose?'NT$ '+d.preDivClose:'—'}</td>
+      <td style="font-weight:700;${d.yieldPct>=5?'color:var(--green)':''};">${d.yieldPct!=null?d.yieldPct+'%':'—'}</td>
+      <td>${fillHtml}</td>
+    </tr>`;
+  }).join('');
+  return `
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px;">
+      <div style="font-size:var(--fs-md);font-weight:700;color:#0f172a;margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        💰 歷年配息記錄（近5年）
+        ${avgFill!=null?`<span style="font-size:var(--fs-sm);font-weight:600;padding:3px 10px;background:var(--blue-l);color:var(--blue);border-radius:20px;">平均填息 ${avgFill} 個交易日</span>`:''}
+      </div>
+      <div class="div-table-wrap">
+        <table class="div-table">
+          <thead><tr><th>除息日</th><th>配息（元/股）</th><th>除息前股價</th><th>當時殖利率</th><th>預估填息天數</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="font-size:11px;color:var(--gray-400);margin-top:8px;line-height:1.6;">
+        ⚡ 填息天數 = 除息後股價收盤回到除息前收盤水準所需交易日。資料來源：Yahoo Finance 歷史股價（近5年）。
+      </div>
+    </div>`;
+}
+
+function renderDirectorChanges(dirChanges){
+  const hd=`<div style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px;"><div style="font-size:var(--fs-sm);font-weight:700;color:var(--gray-500);margin-bottom:10px;letter-spacing:.3px;">👔 董監事持股異動（近6個月）</div>`;
+  if(!dirChanges) return hd+`<div style="color:var(--gray-400);font-size:var(--fs-sm);padding:8px 0;">暫無資料（TWSE 資料可能尚未公布或本股近期無異動）</div></div>`;
+  if(!dirChanges.transactions?.length) return hd+`<div style="color:var(--gray-400);font-size:var(--fs-sm);padding:8px 0;">近6個月無董監事持股異動記錄</div></div>`;
+  const isTWSE=dirChanges.source!=='Yahoo Finance';
+  const items=dirChanges.transactions.map(t=>{
+    const isBuy=t.isBuy;
+    const sharesNum=isTWSE?t.changeShares:t.shares;
+    const sharesText=sharesNum!=null?`${sharesNum>0?'+':''}${Math.round(sharesNum/1000).toLocaleString()} 張`:'—';
+    const afterText=isTWSE&&t.afterShares!=null?`持有後 ${Math.round(t.afterShares/1000).toLocaleString()} 張`:'';
+    const roleTag=t.role?`<span style="display:inline-block;padding:1px 7px;background:${isBuy?'#dcfce7':'#fee2e2'};border-radius:10px;font-size:11px;color:${isBuy?'#16a34a':'#dc2626'};margin-left:5px;">${esc(t.role)}</span>`:'';
+    return `<div class="director-item">
+      <div class="director-icon ${isBuy?'buy':'sell'}">${isBuy?'📈':'📉'}</div>
+      <div class="director-body">
+        <div class="director-name">${esc(t.name)}${roleTag}</div>
+        <div class="director-chg ${isBuy?'pos':'neg'}">${sharesText}</div>
+        <div class="director-meta">${esc(t.date)}${afterText?'　·　'+afterText:''}${t.reason?'　·　'+esc(t.reason):''}</div>
+      </div>
+    </div>`;
+  }).join('');
+  return hd+`<div class="director-list">${items}</div>
+    <div style="font-size:11px;color:var(--gray-400);margin-top:8px;line-height:1.6;">📌 資料來源：${esc(dirChanges.source)}。董監事持續買進為正面信號；連續賣超需留意。</div></div>`;
 }
 
 function renderNews(news){
